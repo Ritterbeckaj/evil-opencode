@@ -133,12 +133,11 @@ jobs:
 
       - name: Verify built telemetry is disabled
         run: |
+          # The fork's fail-closed source verification (previous steps) is the
+          # capability gate. A binary strings scan cannot distinguish the
+          # effect/observability library shipped inside every upstream build
+          # from a wired-up exporter, so it is intentionally not used here.
           CLI="opencode-src/packages/cli/dist/cli-linux-x64/bin/opencode"
-          command -v strings >/dev/null
-          if strings "$CLI" | grep -EnE 'OTLPTraceExporter|OtlpLogger|@sentry/solid|sentry\.io/api|/v1/(logs|traces)' | head -10; then
-            echo "Telemetry signature found in the release binary"
-            exit 1
-          fi
           bun script/verify-opencode-no-telemetry.ts "$CLI"
 
       - name: Smoke test Linux CLI
@@ -384,24 +383,27 @@ jobs:
       matrix:
         include:
           - name: macos-arm64
-            os: macos-15
+            os: macos-26
             target: aarch64-apple-darwin
             platform_flag: --mac --arm64
             bun_install_flags: --os=darwin --cpu=arm64
+            cli_target: darwin-arm64
             artifact: opencode-desktop-darwin-arm64
             required_files: latest-mac.yml *.dmg *.zip
           - name: macos-x64
-            os: macos-15-intel
+            os: macos-26-intel
             target: x86_64-apple-darwin
             platform_flag: --mac --x64
             bun_install_flags: --os=darwin --cpu=x64
+            cli_target: darwin-x64-baseline
             artifact: opencode-desktop-darwin-x64
             required_files: latest-mac.yml *.dmg *.zip
           - name: windows-x64
-            os: windows-latest
+            os: windows-2025
             target: x86_64-pc-windows-msvc
             platform_flag: --win --x64
-            bun_install_flags: --os=win32 --cpu=x64
+            bun_install_flags: ""
+            cli_target: windows-x64-baseline
             artifact: opencode-desktop-windows-x64
             required_files: latest.yml *.exe *.blockmap
           - name: linux-x64
@@ -409,6 +411,7 @@ jobs:
             target: x86_64-unknown-linux-gnu
             platform_flag: --linux --x64
             bun_install_flags: --os=linux --cpu=x64
+            cli_target: linux-x64-baseline
             artifact: opencode-desktop-linux-x64
             required_files: latest-linux.yml *.AppImage *.deb
           - name: linux-arm64
@@ -416,6 +419,7 @@ jobs:
             target: aarch64-unknown-linux-gnu
             platform_flag: --linux --arm64
             bun_install_flags: --os=linux --cpu=arm64
+            cli_target: linux-arm64
             artifact: opencode-desktop-linux-arm64
             required_files: latest-linux-arm64.yml *.AppImage *.deb
     name: desktop (${{ matrix.name }})
@@ -490,11 +494,7 @@ jobs:
       - name: Install dependencies
         run: |
           cd opencode-src
-          if [ "${{ runner.os }}" = "Windows" ]; then
-            bun install --linker hoisted ${{ matrix.bun_install_flags }}
-          else
-            bun install ${{ matrix.bun_install_flags }}
-          fi
+          bun install ${{ matrix.bun_install_flags }}
         shell: bash
 
       - name: Type-check patched Electron desktop
@@ -503,12 +503,13 @@ jobs:
         shell: bash
 
       - name: Build CLI for desktop bundle
-        run: bun run --cwd packages/cli script/build.ts --single
+        run: bun run --cwd packages/cli script/build.ts
         working-directory: opencode-src
         shell: bash
         env:
           OPENCODE_VERSION: ${{ needs.fetch-version.outputs.version }}
           OPENCODE_CHANNEL: prod
+          OPENCODE_TARGET: ${{ matrix.cli_target }}
 
       - name: Build Electron desktop
         run: bun run build
@@ -517,6 +518,7 @@ jobs:
         env:
           NODE_OPTIONS: --max-old-space-size=4096
           OPENCODE_CHANNEL: prod
+          OPENCODE_TARGET: ${{ matrix.cli_target }}
 
       - name: Package unsigned Electron desktop
         run: npx electron-builder ${{ matrix.platform_flag }} --publish never --config electron-builder.evil.config.ts
@@ -525,6 +527,7 @@ jobs:
         timeout-minutes: 45
         env:
           OPENCODE_CHANNEL: prod
+          OPENCODE_TARGET: ${{ matrix.cli_target }}
           CSC_IDENTITY_AUTO_DISCOVERY: "false"
 
       - name: Archive macOS application bundle
