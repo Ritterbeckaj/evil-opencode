@@ -152,6 +152,71 @@ export namespace Observability {
   return root
 }
 
+
+function v2Fixture() {
+  const root = fs.mkdtempSync(path.join(os.tmpdir(), "evil-opencode-telemetry-v2-"))
+  temporaryRoots.push(root)
+  const files: Record<string, string> = {
+    "packages/cli/package.json": `{"name":"@opencode/cli"}`,
+    "packages/util/src/observability/otlp.ts": `import { Effect, Layer, Scope } from "effect"
+import { OtlpLogger } from "effect/observability"
+import { runID } from "./shared.js"
+
+export interface Options {
+  readonly endpoint?: string
+  readonly headers?: string
+}
+
+export interface App {
+  readonly client: string
+  readonly version: string
+  readonly channel: string
+}
+
+export function loggers(options: Options | undefined, app: App) {
+  if (!options?.endpoint) return []
+  return [OtlpLogger.make({ url: \`\${options.endpoint}/v1/logs\` })]
+}
+
+export const tracingLayer = Effect.fnUntraced(function* (options: Options | undefined, app: App) {
+  if (!options?.endpoint) return Layer.empty
+  const OTLP = yield* Effect.promise(() => import("@opentelemetry/exporter-trace-otlp-http"))
+  return Layer.unwrap(Effect.promise(async () => Layer.empty))
+})
+`,
+    "packages/util/src/observability.ts": `import { NodeFileSystem } from "@effect/platform-node"
+import { Otlp } from "./observability/otlp.js"
+import { Logging } from "./observability/logging.js"
+
+export const layer = Logger.layer([...Logging.loggers(true, "local"), ...Otlp.loggers({ endpoint: process.env.OTEL_EXPORTER_OTLP_ENDPOINT }, { client: "opencode", version: "2.2.7", channel: "local" })]).pipe(
+  Layer.provide(NodeFileSystem.layer),
+)
+`,
+    "packages/app/src/entry.tsx": `import { init } from "@sentry/solid"
+
+init({ dsn: import.meta.env.VITE_SENTRY_DSN })
+`,
+    "packages/app/src/shell/errors/error.tsx": `export const report = () => {
+  void import("@sentry/solid").then(({ captureException }) => captureException(new Error("fixture")))
+}
+`,
+    "packages/app/src/app.tsx": `void import("@sentry/solid").then(({ captureException }) => captureException(new Error("fixture")))
+`,
+    "packages/app/vite.config.ts": `import { sentryVitePlugin } from "@sentry/vite-plugin"
+
+export default { plugins: [sentryVitePlugin({ authToken: "fixture" })] }
+`,
+    "packages/desktop/src/renderer/startup/sentry.ts": `export async function initializeSentry() {
+  if (!import.meta.env.VITE_SENTRY_DSN) return
+  const { init } = await import("@sentry/solid")
+  init({ dsn: "fixture" })
+}
+`,
+  }
+  for (const [file, content] of Object.entries(files)) write(root, file, content)
+  return { root }
+}
+
 afterEach(() => {
   for (const root of temporaryRoots.splice(0)) fs.rmSync(root, { recursive: true, force: true })
 })
@@ -246,6 +311,42 @@ describe("stripTelemetry on a modern OpenCode checkout", () => {
     expect(source).toContain("export const layer = EffectLogger.layer")
     expect(source).not.toContain("OtlpLogger")
     expect(source).not.toContain("OTLPTraceExporter")
+    expect(verifyTelemetryDisabled(root)).toEqual([])
+  })
+
+  test("disables v2 OTLP and Sentry shims while preserving local logging", () => {
+    const { root } = v2Fixture()
+
+    const result = stripTelemetry(root)
+    expect(result.warnings).toEqual([])
+    expect(result.changes.length).toBeGreaterThan(0)
+    expect(verifyTelemetryDisabled(root)).toEqual([])
+
+    const otlp = fs.readFileSync(path.join(root, "packages/util/src/observability/otlp.ts"), "utf8")
+    expect(otlp).toContain("evil-opencode: telemetry disabled at build time")
+    expect(otlp).toContain("return []")
+    expect(otlp).toContain("Layer.empty")
+    expect(otlp).not.toContain("OtlpLogger")
+    expect(otlp).not.toContain("OTLPTraceExporter")
+    expect(otlp).not.toContain("/v1/traces")
+    expect(otlp).not.toContain("/v1/logs")
+    expect(otlp).not.toContain("export const tracingLayer = Effect.fnUntraced")
+
+    const observability = fs.readFileSync(path.join(root, "packages/util/src/observability.ts"), "utf8")
+    expect(observability).toContain("Logging.loggers")
+    expect(observability).toContain("Otlp.loggers")
+
+    expect(fs.readFileSync(path.join(root, "packages/app/src/entry.tsx"), "utf8")).toContain('from "@/sentry-disabled"')
+    expect(fs.readFileSync(path.join(root, "packages/app/src/shell/errors/error.tsx"), "utf8")).toContain(
+      'import("@/sentry-disabled")',
+    )
+    expect(fs.readFileSync(path.join(root, "packages/app/src/app.tsx"), "utf8")).toContain('import("@/sentry-disabled")')
+    expect(fs.readFileSync(path.join(root, "packages/desktop/src/renderer/startup/sentry.ts"), "utf8")).not.toContain(
+      '"@sentry/solid"',
+    )
+
+    const second = stripTelemetry(root)
+    expect(second).toEqual({ changes: [], warnings: [] })
     expect(verifyTelemetryDisabled(root)).toEqual([])
   })
 })

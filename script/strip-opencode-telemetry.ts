@@ -78,6 +78,48 @@ function update(root: string, file: string, reason: string, transform: (content:
   return true
 }
 
+const v2Otlp = `import { Effect, Layer } from "effect"
+
+// ${marker}. No logger or trace exporter can be created by release binaries.
+// The public API is preserved so observability wiring keeps compiling.
+export interface Options {
+  readonly endpoint?: string
+  readonly headers?: string
+}
+
+export interface App {
+  readonly client: string
+  readonly version: string
+  readonly channel: string
+}
+
+export function resource(app: App = { client: "opencode", version: "unknown", channel: "local" }) {
+  return {
+    serviceName: "opencode",
+    serviceVersion: app.version,
+    attributes: {},
+  }
+}
+
+export function loggers() {
+  return []
+}
+
+export const tracingLayer = (_options?: Options, _app?: App) => Effect.succeed(Layer.empty)
+`
+
+function disableV2Otlp(root: string, changes: Change[]) {
+  const otlp = "packages/util/src/observability/otlp.ts"
+  if (!exists(root, otlp)) return
+  update(
+    root,
+    otlp,
+    "replace the OTLP exporter with a no-op while preserving the public API",
+    () => v2Otlp,
+    changes,
+  )
+}
+
 function disableAiSdkTelemetry(root: string, changes: Change[]) {
   for (const file of ["packages/opencode/src/session/llm.ts", "packages/opencode/src/agent/agent.ts"]) {
     update(
@@ -101,6 +143,21 @@ function disableAiSdkTelemetry(root: string, changes: Change[]) {
 }
 
 function disableModernOtlp(root: string, changes: Change[]) {
+  const otlpV2 = "packages/util/src/observability/otlp.ts"
+  if (exists(root, otlpV2)) {
+    const content = read(root, otlpV2)
+    if (!content.includes(marker) || !/return \[\]/.test(content) || !content.includes("Layer.empty")) {
+      errors.push(`${otlpV2}: loggers()/tracingLayer() are not verified no-ops`)
+    }
+    if (/@opentelemetry\/|@effect\/opentelemetry\/|\bOtlpLogger\b|\bOTLP[A-Za-z]*Exporter\b|\/v1\/(?:logs|traces)\b/.test(content)) {
+      errors.push(`${otlpV2}: exporter capability remains`)
+    }
+    const observability = "packages/util/src/observability.ts"
+    if (!exists(root, observability) || !read(root, observability).includes("Logging.loggers")) {
+      errors.push(`${observability}: local logging is not verifiably preserved`)
+    }
+  }
+
   const otlp = "packages/core/src/observability/otlp.ts"
   if (!exists(root, otlp)) return
 
@@ -201,7 +258,7 @@ export namespace Observability {
 function disableSentry(root: string, changes: Change[]) {
   const appSources = files(root, "packages/app/src")
   const desktopSources = files(root, "packages/desktop/src")
-  const sentrySolidImport = /from\s+["']@sentry\/solid["']/
+  const sentrySolidImport = /(?:from\s+|import\()\s*["']@sentry\/solid["']/
   const appUsesSentry = appSources.some((file) => sentrySolidImport.test(read(root, file)))
   const desktopUsesSentry = desktopSources.some((file) => sentrySolidImport.test(read(root, file)))
 
@@ -232,6 +289,7 @@ export function captureException(_error: unknown) {
         (content) =>
           content
             .replace(/from\s+["']@sentry\/solid["']/g, 'from "@/sentry-disabled"')
+            .replaceAll('import("@sentry/solid")', 'import("@/sentry-disabled")')
             .replaceAll("when={Sentry.isEnabled}", "when={Sentry.isEnabled()}"),
         changes,
       )
@@ -263,7 +321,10 @@ export function captureException(_error: unknown) {
         root,
         file,
         "route desktop error reporting to the no-op shim",
-        (content) => content.replace(/from\s+["']@sentry\/solid["']/g, `from "${specifier}"`),
+        (content) =>
+          content
+            .replace(/from\s+["']@sentry\/solid["']/g, `from "${specifier}"`)
+            .replaceAll('import("@sentry/solid")', `import("${specifier}")`),
         changes,
       )
     }
@@ -286,12 +347,19 @@ export function captureException(_error: unknown) {
 
 export function verifyTelemetryDisabled(root: string) {
   const errors: string[] = []
-  const runtimeFiles = [
-    ...files(root, "packages/opencode/src"),
-    ...files(root, "packages/core/src"),
-    ...files(root, "packages/app/src"),
-    ...files(root, "packages/desktop/src"),
+  const runtimeDirs = [
+    "packages/opencode/src",
+    "packages/core/src",
+    "packages/cli/src",
+    "packages/util/src",
+    "packages/ai/src",
+    "packages/tui/src",
+    "packages/ui/src",
+    "packages/server/src",
+    "packages/app/src",
+    "packages/desktop/src",
   ]
+  const runtimeFiles = runtimeDirs.flatMap((dir) => files(root, dir))
   const buildFiles = ["packages/app/vite.config.ts", "packages/desktop/electron.vite.config.ts"].filter((file) =>
     exists(root, file),
   )
@@ -382,13 +450,14 @@ export function verifyTelemetryDisabled(root: string) {
 
 export function stripTelemetry(root: string): StripResult {
   const target = path.resolve(root)
-  if (!exists(target, "packages/opencode/package.json")) {
+  if (!exists(target, "packages/opencode/package.json") && !exists(target, "packages/cli/package.json")) {
     throw new Error(`Not an OpenCode checkout: ${target}`)
   }
 
   const changes: Change[] = []
   const warnings: string[] = []
   disableAiSdkTelemetry(target, changes)
+  disableV2Otlp(target, changes)
   disableModernOtlp(target, changes)
   disableLegacyOtlp(target, changes)
   disableSentry(target, changes)
