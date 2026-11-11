@@ -388,6 +388,7 @@ jobs:
             platform_flag: --mac --arm64
             bun_install_flags: --os=darwin --cpu=arm64
             cli_target: darwin-arm64
+            desktop_target: darwin-arm64
             artifact: opencode-desktop-darwin-arm64
             required_files: latest-mac.yml *.dmg *.zip
           - name: macos-x64
@@ -396,6 +397,7 @@ jobs:
             platform_flag: --mac --x64
             bun_install_flags: --os=darwin --cpu=x64
             cli_target: darwin-x64-baseline
+            desktop_target: darwin-x64
             artifact: opencode-desktop-darwin-x64
             required_files: latest-mac.yml *.dmg *.zip
           - name: windows-x64
@@ -404,6 +406,7 @@ jobs:
             platform_flag: --win --x64
             bun_install_flags: ""
             cli_target: windows-x64-baseline
+            desktop_target: windows-x64
             artifact: opencode-desktop-windows-x64
             required_files: latest.yml *.exe *.blockmap
           - name: linux-x64
@@ -412,6 +415,7 @@ jobs:
             platform_flag: --linux --x64
             bun_install_flags: --os=linux --cpu=x64
             cli_target: linux-x64-baseline
+            desktop_target: linux-x64
             artifact: opencode-desktop-linux-x64
             required_files: latest-linux.yml *.AppImage *.deb
           - name: linux-arm64
@@ -420,6 +424,7 @@ jobs:
             platform_flag: --linux --arm64
             bun_install_flags: --os=linux --cpu=arm64
             cli_target: linux-arm64
+            desktop_target: linux-arm64
             artifact: opencode-desktop-linux-arm64
             required_files: latest-linux-arm64.yml *.AppImage *.deb
     name: desktop (${{ matrix.name }})
@@ -518,7 +523,7 @@ jobs:
         env:
           NODE_OPTIONS: --max-old-space-size=4096
           OPENCODE_CHANNEL: prod
-          OPENCODE_TARGET: ${{ matrix.cli_target }}
+          OPENCODE_TARGET: ${{ matrix.desktop_target }}
 
       - name: Package unsigned Electron desktop
         run: npx electron-builder ${{ matrix.platform_flag }} --publish never --config electron-builder.evil.config.ts
@@ -527,7 +532,7 @@ jobs:
         timeout-minutes: 45
         env:
           OPENCODE_CHANNEL: prod
-          OPENCODE_TARGET: ${{ matrix.cli_target }}
+          OPENCODE_TARGET: ${{ matrix.desktop_target }}
           CSC_IDENTITY_AUTO_DISCOVERY: "false"
 
       - name: Archive macOS application bundle
