@@ -67,7 +67,7 @@ jobs:
       - name: Remove guardrails and inject reasoning/efficiency directives
         run: |
           cd opencode-src
-          cp script/reasoning-efficiency-inject.txt /tmp/inject.txt
+          cp "$GITHUB_WORKSPACE/script/reasoning-efficiency-inject.txt" /tmp/inject.txt
           PROMPT_FILES=$(find packages -path '*system-prompt/*.txt' -o -path '*runner/prompt/*.txt' -o -path '*session/prompt/*.txt' 2>/dev/null | sort)
           if [ -z "$PROMPT_FILES" ]; then
             echo "FAIL: no prompt .txt files found in expected paths (v1: packages/opencode/src/session/prompt, v2: packages/core/src/plugin/system-prompt, packages/core/src/session/runner/prompt)"
@@ -224,7 +224,7 @@ jobs:
       - name: Remove guardrails and inject reasoning/efficiency directives
         run: |
           cd opencode-src
-          cp script/reasoning-efficiency-inject.txt /tmp/inject.txt
+          cp "$GITHUB_WORKSPACE/script/reasoning-efficiency-inject.txt" /tmp/inject.txt
           PROMPT_FILES=$(find packages -path '*system-prompt/*.txt' -o -path '*runner/prompt/*.txt' -o -path '*session/prompt/*.txt' 2>/dev/null | sort)
           if [ -z "$PROMPT_FILES" ]; then
             echo "FAIL: no prompt .txt files found in expected paths (v1: packages/opencode/src/session/prompt, v2: packages/core/src/plugin/system-prompt, packages/core/src/session/runner/prompt)"
@@ -335,7 +335,7 @@ jobs:
       - name: Remove guardrails and inject reasoning/efficiency directives
         run: |
           cd opencode-src
-          cp script/reasoning-efficiency-inject.txt /tmp/inject.txt
+          cp "$GITHUB_WORKSPACE/script/reasoning-efficiency-inject.txt" /tmp/inject.txt
           PROMPT_FILES=$(find packages -path '*system-prompt/*.txt' -o -path '*runner/prompt/*.txt' -o -path '*session/prompt/*.txt' 2>/dev/null | sort)
           if [ -z "$PROMPT_FILES" ]; then
             echo "FAIL: no prompt .txt files found in expected paths (v1: packages/opencode/src/session/prompt, v2: packages/core/src/plugin/system-prompt, packages/core/src/session/runner/prompt)"
@@ -481,7 +481,7 @@ jobs:
       - name: Remove guardrails and inject reasoning/efficiency directives
         run: |
           cd opencode-src
-          cp script/reasoning-efficiency-inject.txt /tmp/inject.txt
+          cp "$GITHUB_WORKSPACE/script/reasoning-efficiency-inject.txt" /tmp/inject.txt
           PROMPT_FILES=$(find packages -path '*system-prompt/*.txt' -o -path '*runner/prompt/*.txt' -o -path '*session/prompt/*.txt' 2>/dev/null | sort)
           if [ -z "$PROMPT_FILES" ]; then
             echo "FAIL: no prompt .txt files found in expected paths (v1: packages/opencode/src/session/prompt, v2: packages/core/src/plugin/system-prompt, packages/core/src/session/runner/prompt)"
