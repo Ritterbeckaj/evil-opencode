@@ -136,6 +136,57 @@ export const tracingLayer = (_options?: Options, _app?: App) => Effect.succeed(L
 
 export * as Otlp from "./otlp.js"
 `
+const v2Observability = `export * as Observability from "./observability.js"
+
+import * as NodeFileSystem from "@effect/platform-node/NodeFileSystem"
+import { LayerNode } from "./effect/layer-node.js"
+import { Layer, Logger, References, Schema } from "effect"
+import { Logging } from "./observability/logging.js"
+
+// ${marker}. Local logging only; the OTLP exporter capability is not part of this build.
+export const Options = Schema.Struct({
+  endpoint: Schema.optional(Schema.String),
+  headers: Schema.optional(Schema.String),
+  client: Schema.optional(Schema.String),
+  version: Schema.optional(Schema.String),
+  channel: Schema.optional(Schema.String),
+})
+export type Options = typeof Options.Type
+
+export function layer(options?: Options) {
+  const app = {
+    client: options?.client ?? "opencode",
+    version: options?.version ?? "unknown",
+    channel: options?.channel ?? "local",
+  }
+  return Logger.layer(Logging.loggers(app.channel === "local", app.channel), { mergeWithExisting: false }).pipe(
+    Layer.provide(NodeFileSystem.layer),
+    Layer.orDie,
+    Layer.merge(Layer.succeed(References.MinimumLogLevel, Logging.minimumLogLevel())),
+  )
+}
+
+// Layer.suspend: constructing the loggers eagerly at module scope performs
+// I/O (file logger, run id) that workerd forbids in global scope.
+export const node = LayerNode.make({
+  name: "observability",
+  layer: Layer.suspend(() => layer()),
+  deps: [],
+})
+`
+
+function disableV2Observability(root: string, changes: Change[]) {
+  const file = "packages/util/src/observability.ts"
+  if (!exists(root, file)) return
+  update(
+    root,
+    file,
+    "drop the OTLP exporter wiring; keep local file logging only",
+    () => v2Observability,
+    changes,
+  )
+}
+
 function disableV2Otlp(root: string, changes: Change[]) {
   const otlp = "packages/util/src/observability/otlp.ts"
   if (!exists(root, otlp)) return
@@ -183,6 +234,11 @@ function disableModernOtlp(root: string, changes: Change[]) {
     const observability = "packages/util/src/observability.ts"
     if (!exists(root, observability) || !read(root, observability).includes("Logging.loggers")) {
       errors.push(`${observability}: local logging is not verifiably preserved`)
+    } else {
+      const content = read(root, observability)
+      if (/effect\/observability|OtlpExporter|OtlpSerialization/.test(content)) {
+        errors.push(`${observability}: OTLP exporter wiring remains`)
+      }
     }
   }
 
@@ -486,6 +542,7 @@ export function stripTelemetry(root: string): StripResult {
   const warnings: string[] = []
   disableAiSdkTelemetry(target, changes)
   disableV2Otlp(target, changes)
+  disableV2Observability(target, changes)
   disableModernOtlp(target, changes)
   disableLegacyOtlp(target, changes)
   disableSentry(target, changes)

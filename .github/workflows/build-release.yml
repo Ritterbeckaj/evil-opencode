@@ -135,7 +135,7 @@ jobs:
         run: |
           CLI="opencode-src/packages/cli/dist/cli-linux-x64/bin/opencode"
           command -v strings >/dev/null
-          if strings "$CLI" | grep -Eq 'OTLPTraceExporter|OtlpLogger|@sentry/solid|sentry\.io/api|/v1/(logs|traces)'; then
+          if strings "$CLI" | grep -EnE 'OTLPTraceExporter|OtlpLogger|@sentry/solid|sentry\.io/api|/v1/(logs|traces)' | head -10; then
             echo "Telemetry signature found in the release binary"
             exit 1
           fi
@@ -502,14 +502,13 @@ jobs:
         working-directory: opencode-src
         shell: bash
 
-      - name: Prepare Electron desktop
-        run: bun ./scripts/prepare.ts
-        working-directory: opencode-src/packages/desktop
+      - name: Build CLI for desktop bundle
+        run: bun run --cwd packages/cli script/build.ts --single
+        working-directory: opencode-src
         shell: bash
         env:
           OPENCODE_VERSION: ${{ needs.fetch-version.outputs.version }}
           OPENCODE_CHANNEL: prod
-          RUST_TARGET: ${{ matrix.target }}
 
       - name: Build Electron desktop
         run: bun run build

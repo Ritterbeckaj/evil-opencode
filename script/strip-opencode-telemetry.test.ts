@@ -185,11 +185,14 @@ export const tracingLayer = Effect.fnUntraced(function* (options: Options | unde
 })
 `,
     "packages/util/src/observability.ts": `import { NodeFileSystem } from "@effect/platform-node"
+import { OtlpExporter, OtlpSerialization } from "effect/observability"
 import { Otlp } from "./observability/otlp.js"
 import { Logging } from "./observability/logging.js"
 
 export const layer = Logger.layer([...Logging.loggers(true, "local"), ...Otlp.loggers({ endpoint: process.env.OTEL_EXPORTER_OTLP_ENDPOINT }, { client: "opencode", version: "2.2.7", channel: "local" })]).pipe(
   Layer.provide(NodeFileSystem.layer),
+  Layer.provide(OtlpSerialization.layerJson),
+  Layer.provide(OtlpExporter.layerFlusher),
 )
 `,
     "packages/app/src/entry.tsx": `import { init } from "@sentry/solid"
@@ -334,7 +337,10 @@ describe("stripTelemetry on a modern OpenCode checkout", () => {
 
     const observability = fs.readFileSync(path.join(root, "packages/util/src/observability.ts"), "utf8")
     expect(observability).toContain("Logging.loggers")
-    expect(observability).toContain("Otlp.loggers")
+    expect(observability).not.toContain("Otlp.loggers")
+    expect(observability).not.toContain("OtlpExporter")
+    expect(observability).not.toContain("effect/observability")
+    expect(observability).toContain("export const node")
 
     expect(fs.readFileSync(path.join(root, "packages/app/src/entry.tsx"), "utf8")).toContain('from "@/sentry-disabled"')
     expect(fs.readFileSync(path.join(root, "packages/app/src/shell/errors/error.tsx"), "utf8")).toContain(
