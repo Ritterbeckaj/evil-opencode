@@ -79,9 +79,10 @@ function update(root: string, file: string, reason: string, transform: (content:
 }
 
 const v2Otlp = `import { Effect, Layer } from "effect"
+import { runID } from "./shared.js"
 
 // ${marker}. No logger or trace exporter can be created by release binaries.
-// The public API is preserved so observability wiring keeps compiling.
+// The public API (including resource()) is preserved verbatim for compatibility.
 export interface Options {
   readonly endpoint?: string
   readonly headers?: string
@@ -93,21 +94,48 @@ export interface App {
   readonly channel: string
 }
 
-export function resource(app: App = { client: "opencode", version: "unknown", channel: "local" }) {
-  return {
-    serviceName: "opencode",
-    serviceVersion: app.version,
-    attributes: {},
+function resourceAttributes() {
+  const value = process.env.OTEL_RESOURCE_ATTRIBUTES
+  if (!value) return {}
+  try {
+    return Object.fromEntries(
+      value.split(",").map((entry) => {
+        const index = entry.indexOf("=")
+        if (index < 1) throw new Error("Invalid OTEL_RESOURCE_ATTRIBUTES entry")
+        return [decodeURIComponent(entry.slice(0, index)), decodeURIComponent(entry.slice(index + 1))]
+      }),
+    )
+  } catch {
+    return {}
   }
 }
 
-export function loggers() {
+export function resource(app: App = { client: "opencode", version: "unknown", channel: "local" }): {
+  serviceName: string
+  serviceVersion: string
+  attributes: Record<string, string>
+} {
+  return {
+    serviceName: "opencode",
+    serviceVersion: app.version,
+    attributes: {
+      ...resourceAttributes(),
+      "deployment.environment.name": app.channel,
+      "opencode.client": app.client,
+      "opencode.run": runID(),
+      "service.instance.id": runID(),
+    },
+  }
+}
+
+export function loggers(_options?: Options, _app?: App) {
   return []
 }
 
 export const tracingLayer = (_options?: Options, _app?: App) => Effect.succeed(Layer.empty)
-`
 
+export * as Otlp from "./otlp.js"
+`
 function disableV2Otlp(root: string, changes: Change[]) {
   const otlp = "packages/util/src/observability/otlp.ts"
   if (!exists(root, otlp)) return
